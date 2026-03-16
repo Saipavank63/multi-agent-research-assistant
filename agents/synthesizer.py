@@ -1,29 +1,50 @@
-import os
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.prompts import ChatPromptTemplate
+from typing import List
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 llm = ChatOpenAI(
     model="gpt-4o",
-    openai_api_key=os.getenv("OPENAI_API_KEY"),
-    temperature=0.3,
-    streaming=True
+    temperature=0.1,
+    api_key=os.getenv("OPENAI_API_KEY")
 )
 
-SYSTEM = """You are a synthesis agent. Combine the research notes into a clear, well-structured
-answer for the original query. Use markdown formatting. Cite sources inline as [Source: filename]."""
+SYNTHESIZER_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are a research synthesizer. Your job is to produce a clear,
+accurate, well-structured answer based ONLY on the provided documents.
+
+Instructions:
+1. Identify the key claim or insight from each relevant document
+2. Resolve any contradictions between sources explicitly
+3. Structure the answer with a direct response first, then supporting detail
+4. Flag any important gaps or uncertainties at the end
+5. Do not invent information not present in the documents"""),
+    ("human", """Query: {query}
+
+Research Documents:
+{documents}
+
+Provide a comprehensive, well-structured answer:""")
+])
 
 
-def synthesizer_node(state: dict) -> dict:
-    response = llm.invoke([
-        SystemMessage(content=SYSTEM),
-        HumanMessage(content=(
-            f"Query: {state['query']}\n\n"
-            f"Research notes:\n{state['research_notes']}\n\n"
-            f"Critic feedback:\n{state.get('critique', 'N/A')}"
-        ))
-    ])
+def run_synthesizer(query: str, research_results: List[str]) -> str:
+    if not research_results:
+        return "Insufficient information found to answer this query reliably."
 
-    return {
-        "final_answer": response.content,
-        "messages": [{"role": "synthesizer", "content": response.content}]
-    }
+    docs_text = "\n\n---\n\n".join(
+        f"Source {i+1}:\n{doc[:800]}"
+        for i, doc in enumerate(research_results[:8])
+    )
+
+    try:
+        response = llm.invoke(
+            SYNTHESIZER_PROMPT.format_messages(query=query, documents=docs_text)
+        )
+        return response.content.strip()
+    except Exception as e:
+        print(f"[Synthesizer] Error: {e}")
+        return f"Synthesis failed: {str(e)}"

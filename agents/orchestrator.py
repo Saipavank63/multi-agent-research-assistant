@@ -1,47 +1,93 @@
-import operator
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, List
 
 from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from langchain_core.messages import HumanMessage, AIMessage
 
-from agents.researcher import researcher_node
-from agents.critic import critic_node
-from agents.synthesizer import synthesizer_node
+from agents.researcher import run_researcher
+from agents.critic import run_critic
+from agents.synthesizer import run_synthesizer
 
 
 class ResearchState(TypedDict):
     query: str
-    retrieved_docs: list[dict]
-    research_notes: str
-    critique: str
+    messages: Annotated[List, add_messages]
+    research_results: List[str]
+    critique_score: float
+    critique_feedback: str
     final_answer: str
-    iteration: int
-    messages: Annotated[list, operator.add]
+    iteration_count: int
 
 
-def _should_revise(state: ResearchState) -> str:
-    if state.get("iteration", 0) >= 2:
+def researcher_node(state: ResearchState) -> dict:
+    print(f"[Orchestrator] → Researcher (iteration {state['iteration_count'] + 1})")
+    results = run_researcher(state["query"], state.get("critique_feedback", ""))
+    return {
+        "research_results": results,
+        "iteration_count": state["iteration_count"] + 1,
+        "messages": [AIMessage(content=f"Researcher found {len(results)} documents")]
+    }
+
+
+def critic_node(state: ResearchState) -> dict:
+    print("[Orchestrator] → Critic")
+    score, feedback = run_critic(state["query"], state["research_results"])
+    return {
+        "critique_score": score,
+        "critique_feedback": feedback,
+        "messages": [AIMessage(content=f"Critic score: {score:.2f}")]
+    }
+
+
+def synthesizer_node(state: ResearchState) -> dict:
+    print("[Orchestrator] → Synthesizer")
+    answer = run_synthesizer(state["query"], state["research_results"])
+    return {
+        "final_answer": answer,
+        "messages": [AIMessage(content=answer)]
+    }
+
+
+def should_retry(state: ResearchState) -> str:
+    MAX_ITERATIONS = 3
+    if state["iteration_count"] >= MAX_ITERATIONS:
         return "synthesize"
-    if state.get("critique", "").strip().startswith("REVISE"):
-        return "researcher"
-    return "synthesize"
+    if state["critique_score"] >= 0.7:
+        return "synthesize"
+    return "retry"
 
 
-def build_graph():
-    g = StateGraph(ResearchState)
-
-    g.add_node("researcher", researcher_node)
-    g.add_node("critic", critic_node)
-    g.add_node("synthesizer", synthesizer_node)
-
-    g.set_entry_point("researcher")
-    g.add_edge("researcher", "critic")
-    g.add_conditional_edges("critic", _should_revise, {
-        "researcher": "researcher",
-        "synthesize": "synthesizer"
-    })
-    g.add_edge("synthesizer", END)
-
-    return g.compile()
+def build_graph() -> StateGraph:
+    graph = StateGraph(ResearchState)
+    graph.add_node("researcher", researcher_node)
+    graph.add_node("critic", critic_node)
+    graph.add_node("synthesizer", synthesizer_node)
+    graph.set_entry_point("researcher")
+    graph.add_edge("researcher", "critic")
+    graph.add_conditional_edges(
+        "critic",
+        should_retry,
+        {"retry": "researcher", "synthesize": "synthesizer"}
+    )
+    graph.add_edge("synthesizer", END)
+    return graph.compile()
 
 
-research_graph = build_graph()
+def run_research_pipeline(query: str) -> str:
+    app = build_graph()
+    initial_state: ResearchState = {
+        "query": query,
+        "messages": [HumanMessage(content=query)],
+        "research_results": [],
+        "critique_score": 0.0,
+        "critique_feedback": "",
+        "final_answer": "",
+        "iteration_count": 0,
+    }
+    final_state = app.invoke(initial_state)
+    return final_state["final_answer"]
+
+
+if __name__ == "__main__":
+    result = run_research_pipeline("What are the latest advances in agentic AI?")
+    print("\n=== FINAL ANSWER ===\n", result)
