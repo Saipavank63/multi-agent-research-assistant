@@ -4,7 +4,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from mangum import Mangum
-from agents.graph import research_graph
+from agents.orchestrator import research_graph
 
 app = FastAPI(title="Multi-Agent Research Assistant")
 
@@ -41,7 +41,6 @@ async def research(req: QueryRequest):
             node_output = step[node_name]
 
             if node_name == "synthesizer" and "final_answer" in node_output:
-                # stream token by token from final answer
                 for token in node_output["final_answer"].split(" "):
                     yield f"data: {json.dumps({'token': token + ' ', 'done': False})}\n\n"
             else:
@@ -57,5 +56,4 @@ def health():
     return {"status": "ok"}
 
 
-# AWS Lambda handler
 handler = Mangum(app)

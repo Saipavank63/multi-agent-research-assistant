@@ -1,19 +1,18 @@
+import os
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
-from agents.state import ResearchState
-from config import LLM_MODEL, OPENAI_API_KEY
 
-llm = ChatOpenAI(model=LLM_MODEL, openai_api_key=OPENAI_API_KEY, temperature=0)
+llm = ChatOpenAI(model="gpt-4o", openai_api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
 
-SYSTEM = """You are a critical reviewer. Your job is to evaluate research notes for:
+SYSTEM = """You are a critical reviewer. Evaluate the research notes for:
 - Factual accuracy based on the provided context
 - Missing key information
 - Unsupported claims
 
-Respond with: PASS if the notes are solid, or REVISE: <reason> if they need improvement."""
+Respond with PASS if the notes are solid, or REVISE: <reason> if they need improvement."""
 
 
-def critic_node(state: ResearchState) -> dict:
+def critic_node(state: dict) -> dict:
     response = llm.invoke([
         SystemMessage(content=SYSTEM),
         HumanMessage(content=(
@@ -27,14 +26,3 @@ def critic_node(state: ResearchState) -> dict:
         "messages": [{"role": "critic", "content": response.content}],
         "iteration": state.get("iteration", 0) + 1
     }
-
-
-def should_revise(state: ResearchState) -> str:
-    critique = state.get("critique", "")
-    iteration = state.get("iteration", 0)
-
-    if iteration >= 2:
-        return "synthesize"
-    if critique.strip().startswith("REVISE"):
-        return "researcher"
-    return "synthesize"
