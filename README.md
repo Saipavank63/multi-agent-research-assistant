@@ -2,6 +2,8 @@
 
 A production-grade multi-agent system built with **LangGraph** that autonomously researches any topic using three specialized AI agents — Researcher, Critic, and Synthesizer — connected through a state machine orchestrator.
 
+![demo](assets/demo.png)
+
 ---
 
 ## What It Does
